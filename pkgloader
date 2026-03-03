@@ -1,0 +1,178 @@
+#!/bin/bash
+
+DRY_RUN=false
+
+# Parse --dry-run argument
+for arg in "$@"; do
+  if [[ "$arg" == "--dry-run" ]]; then
+    DRY_RUN=true
+  fi
+done
+
+pkgmgr=""
+
+#==================== Detect Distro ====================#
+detect_distro() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    echo "$ID"
+  else
+    echo "unknown"
+  fi
+}
+
+#==================== Package Existence Check ====================#
+is_installed() {
+  local pkg=$1
+  case "$pkgmgr" in
+  apt) dpkg -s "$pkg" &>/dev/null ;;
+  pacman | yay) pacman -Q "$pkg" &>/dev/null ;;
+  *) return 1 ;;
+  esac
+}
+
+#==================== Load External Package Lists ====================#
+if [ -f ./resources/packages.sh ]; then
+  source ./resources/packages.sh
+else
+  echo "❌ Error: packages.sh not found!"
+  exit 1
+fi
+
+#==================== Install Packages ====================#
+install_packages() {
+  local manager=$1
+  local group_name=$2
+  shift 2
+  local packages=("$@")
+
+  echo
+  echo "📦 Group: $group_name"
+  echo "▶ All packages in this group:"
+  printf '  - %s\n' "${packages[@]}"
+
+  read -r -p "Install $group_name? (y/n): " confirm
+  confirm=${confirm,,} # to lowercase
+  [[ "$confirm" != "y" ]] && return
+
+  echo
+  for pkg in "${packages[@]}"; do
+    echo "------------------------------------"
+    if is_installed "$pkg"; then
+      echo "✅ $pkg is already installed. Skipping."
+    else
+      if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] Would install: $pkg"
+      else
+        echo "Installing $pkg..."
+        case "$manager" in
+        apt) sudo apt install -y "$pkg" ;;
+        pacman) sudo pacman -S --noconfirm "$pkg" ;;
+        yay) yay -S --noconfirm "$pkg" ;;
+        esac
+      fi
+    fi
+  done
+}
+
+#==================== Install yay Helper ====================#
+install_yay() {
+  echo
+  echo "Installing yay..."
+  if [ "$DRY_RUN" = true ]; then
+    echo "[DRY RUN] Would install yay (base-devel, git, clone repo, makepkg)"
+    return 0
+  fi
+
+  sudo pacman -S --needed --noconfirm base-devel git || return 1
+  git clone https://aur.archlinux.org/yay.git /tmp/yay || return 1
+  cd /tmp/yay || return 1
+  makepkg -si --noconfirm || return 1
+  cd - && rm -rf /tmp/yay
+}
+
+#==================== Main Runner ====================#
+run_installer() {
+  local distro=$1
+
+  case "$distro" in
+  ubuntu | debian | kali | parrot)
+    echo "🔄 Updating system..."
+    if [ "$DRY_RUN" = true ]; then
+      echo "[DRY RUN] Would run: sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y"
+    else
+      sudo apt update || {
+        echo "❌ Failed to update apt. Aborting."
+        exit 1
+      }
+      sudo apt upgrade -y && sudo apt autoremove -y
+    fi
+    pkgmgr="apt"
+    TERMINAL_TOOLS+=("${DEB_EXTRA[@]}")
+    ;;
+
+  arch | manjaro)
+    echo "🔄 Updating system..."
+    if [ "$DRY_RUN" = true ]; then
+      echo "[DRY RUN] Would run: sudo pacman -Syu --noconfirm"
+    else
+      sudo pacman -Syu --noconfirm
+    fi
+
+    if command -v yay &>/dev/null; then
+      pkgmgr="yay"
+    else
+      read -p "yay not found. Install it? (y/n): " yn
+      if [[ "$yn" == [Yy]* ]]; then
+        if install_yay; then
+          pkgmgr="yay"
+        else
+          echo "⚠️ Failed to install yay. Falling back to pacman."
+          pkgmgr="pacman"
+        fi
+      else
+        pkgmgr="pacman"
+      fi
+    fi
+
+    # Clean orphaned packages
+    if [ "$DRY_RUN" = true ]; then
+      echo "[DRY RUN] Would check and remove orphaned packages (pacman -Qtdq)"
+    else
+      if orphans=$(pacman -Qtdq 2>/dev/null); then
+        if [ -n "$orphans" ]; then
+          echo "🧹 Removing orphaned packages..."
+          echo "$orphans" | xargs -r -d '\n' sudo pacman -Rns
+        fi
+      fi
+    fi
+    ;;
+
+  *)
+    echo "❌ Unsupported or unknown Linux distribution: $distro"
+    exit 1
+    ;;
+  esac
+
+  echo
+  install_packages "$pkgmgr" "Terminal Tools" "${TERMINAL_TOOLS[@]}"
+  install_packages "$pkgmgr" "GNOME Apps" "${GNOME_APPS[@]}"
+  install_packages "$pkgmgr" "Programming Languages" "${DEV_LANGS[@]}"
+  install_packages "$pkgmgr" "Optional Packages" "${OPTIONAL_PACKAGES[@]}"
+  install_packages "$pkgmgr" "YAY Packages" "${YAY_PACKAGES[@]}"
+  install_packages "$pkgmgr" "Hacking Tools" "${HACKING_TOOLS[@]}"
+}
+
+#==================== Script Entry ====================#
+DISTRO=$(detect_distro)
+echo
+echo "============================="
+echo "=> Detected Distro: $DISTRO <="
+echo "============================="
+
+run_installer "$DISTRO"
+
+echo
+echo "================================================"
+echo "✅ All done. A system reboot is recommended! ✅"
+echo "================================================"

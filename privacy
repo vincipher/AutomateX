@@ -1,0 +1,11 @@
+#!/bin/bash
+
+#=====audio======
+#turn off
+sudo modprobe -r uvcvideo
+
+#===microphone===
+#turn off
+amixer sset Capture nocap
+echo "======================================="
+echo "camera and microphone has been disabled"

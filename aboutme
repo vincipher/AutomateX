@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Colors for styling
+GREEN="\e[32m"
+BLUE="\e[34m"
+CYAN="\e[36m"
+MAGENTA="\e[35m"
+RESET="\e[0m"
+
+# Gather system info
+username=$(whoami)
+hostname=$(uname -n)
+ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+gateway_address=$(ip route show default | awk '/default/ {print $3}')
+macaddress=$(ip link show | awk '/ether/ {print $2; exit}')
+os_info=$(grep '^PRETTY_NAME' /etc/os-release | cut -d= -f2 | tr -d '"')
+kernel_version=$(uname -r)
+architecture=$(uname -m)
+uptime_info=$(uptime -p)
+cpu_model=$(grep -m 1 "model name" /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')
+read total_ram used_ram free_ram shared_ram buff_cache available_ram <<<$(free -h | awk '/^Mem:/ {print $2, $3, $4, $5, $6, $7}')
+disk_usage=$(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 " used)"}')
+public_ip=$(curl -s ifconfig.me || echo "Unavailable")
+logged_in_users=$(who | wc -l)
+process_count=$(ps aux | wc -l)
+
+# Output
+echo -e "${MAGENTA}========== SYSTEM INFORMATION ==========${RESET}"
+echo -e "${CYAN} Username:          ${RESET}$username"
+echo -e "${CYAN} Hostname:          ${RESET}$hostname"
+echo -e "${CYAN} OS:                ${RESET}$os_info"
+echo -e "${CYAN} Kernel Version:    ${RESET}$kernel_version"
+echo -e "${CYAN} Architecture:      ${RESET}$architecture"
+echo -e "${CYAN} Uptime:            ${RESET}$uptime_info"
+
+echo -e "${MAGENTA}========== NETWORK INFORMATION =========${RESET}"
+echo -e "${CYAN} IP Address:        ${RESET}$ip_address"
+echo -e "${CYAN} Gateway Address:   ${RESET}$gateway_address"
+echo -e "${CYAN} MAC Address:       ${RESET}$macaddress"
+echo -e "${CYAN} Public IP:         ${RESET}$public_ip"
+
+echo -e "${MAGENTA}========== HARDWARE INFORMATION =======${RESET}"
+echo -e "${CYAN} CPU Model:         ${RESET}$cpu_model"
+echo -e "${CYAN} RAM Available:     ${RESET}$available_ram of $total_ram"
+echo -e "${CYAN} Disk Usage (/):    ${RESET}$disk_usage"
+
+echo -e "${MAGENTA}========== USER & PROCESS INFO ========${RESET}"
+echo -e "${CYAN} Logged-in Users:   ${RESET}$logged_in_users"
+echo -e "${CYAN} Total Processes:   ${RESET}$process_count"
+echo -e "${MAGENTA}=======================================${RESET}"

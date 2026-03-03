@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# Configuration
+PROXY_HOST="127.0.0.1"
+PROXY_PORT="9050"
+PROXY_TYPE="socks5"
+TOR_SERVICE="tor"
+
+# Function to check if the Tor proxy is listening
+check_port() {
+  timeout 1 bash -c "</dev/tcp/$1/$2" 2>/dev/null
+}
+
+echo "Checking if Tor proxy is running at $PROXY_HOST:$PROXY_PORT..."
+
+if ! check_port "$PROXY_HOST" "$PROXY_PORT"; then
+  echo "Tor is not running at $PROXY_HOST:$PROXY_PORT."
+  read -rp "Start Tor service now? (y/n): " choice
+  case "$choice" in
+  y | Y)
+    echo "Starting Tor service..."
+    if sudo systemctl start "$TOR_SERVICE"; then
+      echo "Waiting for Tor to initialize..."
+      sleep 3
+      if ! check_port "$PROXY_HOST" "$PROXY_PORT"; then
+        echo "Tor still not responding on $PROXY_HOST:$PROXY_PORT. Exiting."
+        exit 1
+      fi
+      echo "Tor is now running."
+    else
+      echo "Failed to start Tor service. Exiting."
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Tor is required for proxy routing. Exiting."
+    exit 1
+    ;;
+  esac
+else
+  echo "Tor is already running."
+fi
+
+# Launch Brave with hardened privacy flags
+brave --incognito \
+  --no-first-run \
+  --no-default-browser-check \
+  --no-referrers \
+  --disable-background-networking \
+  --disable-sync \
+  --disable-plugins-discovery \
+  --disable-features=PreloadMediaEngagementData,InterestCohort,NetworkPrediction,AutofillServerCommunication \
+  --disable-autofill \
+  --disable-password-manager \
+  --disable-webrtc-stun-origin \
+  --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
+  --metrics-recording-only=false \
+  --disable-client-side-phishing-detection \
+  --proxy-server="$PROXY_TYPE://$PROXY_HOST:$PROXY_PORT" \
+  --start-maximized

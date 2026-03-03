@@ -1,0 +1,100 @@
+#!/bin/bash
+
+# Function to detect the Linux distribution
+detect_distro() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    echo "$ID"
+  else
+    echo "unknown"
+  fi
+}
+
+# Function to update based on the distro
+update_system() {
+  local distro=$1
+
+  case "$distro" in
+  ubuntu | debian | kali | parrot | pop | pop_os | zorin)
+    echo "[+] Updating $distro..."
+    sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+    ;;
+  arch | manjaro)
+    if command -v yay >/dev/null 2>&1; then
+      echo "[+] yay detected. Updating system and AUR packages..."
+      yay -Syu --noconfirm
+
+      echo "[+] Removing orphaned packages with yay -Yc..."
+      yay -Yc --noconfirm
+    else
+      echo "[+] yay not found. Using pacman instead..."
+      sudo pacman -Syu
+
+      echo "[+] Checking for orphaned packages..."
+      orphans=$(pacman -Qtdq 2>/dev/null)
+      if [ -n "$orphans" ]; then
+        echo "[+] Removing orphaned packages..."
+        sudo pacman -Rns $orphans
+      else
+        echo "[i] No orphaned packages found."
+      fi
+    fi
+    ;;
+  fedora)
+    echo "[+] Updating $distro..."
+    sudo dnf upgrade --refresh -y
+    echo "[+] Running autoremove..."
+    sudo dnf autoremove -y
+    ;;
+  centos | rhel)
+    echo "[+] Updating $distro..."
+    sudo yum update -y
+    echo "[+] Running autoremove..."
+    sudo yum autoremove -y
+    ;;
+  opensuse* | sles)
+    echo "[+] Updating $distro..."
+    sudo zypper refresh && sudo zypper update -y
+    echo "[+] Checking for unneeded packages (manual review suggested)..."
+    sudo zypper packages --unneeded
+    ;;
+  alpine)
+    echo "[+] Updating $distro..."
+    sudo apk update && sudo apk upgrade
+    echo "[i] No built-in autoremove. Use 'apk info -d' for dependency check."
+    ;;
+  *)
+    echo "[-] Unsupported or unknown Linux distribution: $distro"
+    return 1
+    ;;
+  esac
+  # Flatpak update if available
+  if command -v flatpak >/dev/null 2>&1; then
+    echo "[+] Updating Flatpak applications..."
+    if flatpak update -y 1>/dev/null | awk '/Installing|Updating|Uninstalling/'; then
+      echo "[✓] Flatpak update successful."
+    else
+      echo "[-] Flatpak update failed or no updates available."
+    fi
+  else
+    echo "[i] Flatpak not installed, skipping Flatpak updates."
+  fi
+}
+
+# Main script execution
+distro=$(detect_distro)
+echo "[i] Detected Distro: $distro"
+
+update_system "$distro"
+
+var=$(
+  cat <<'END_HEREDOC'
+ ┏━┓╻ ╻┏━┓╺┳╸┏━╸┏┳┓   ╻ ╻┏━┓╺┳┓┏━┓╺┳╸┏━╸╺┳┓   ┏━┓┏┓╻╺┳┓
+ ┗━┓┗┳┛┗━┓ ┃ ┣╸ ┃┃┃   ┃ ┃┣━┛ ┃┃┣━┫ ┃ ┣╸  ┃┃   ┣━┫┃┗┫ ┃┃
+ ┗━┛ ╹ ┗━┛ ╹ ┗━╸╹ ╹   ┗━┛╹  ╺┻┛╹ ╹ ╹ ┗━╸╺┻┛   ╹ ╹╹ ╹╺┻┛
+ ╻ ╻┏━┓┏━╸┏━┓┏━┓╺┳┓┏━╸╺┳┓   ┏━┓╻ ╻┏━╸┏━╸┏━╸┏━┓┏━┓┏━╸╻ ╻╻  ╻  ╻ ╻   
+ ┃ ┃┣━┛┃╺┓┣┳┛┣━┫ ┃┃┣╸  ┃┃   ┗━┓┃ ┃┃  ┃  ┣╸ ┗━┓┗━┓┣╸ ┃ ┃┃  ┃  ┗┳┛   
+ ┗━┛╹  ┗━┛╹┗╸╹ ╹╺┻┛┗━╸╺┻┛   ┗━┛┗━┛┗━╸┗━╸┗━╸┗━┛┗━┛╹  ┗━┛┗━╸┗━╸ ╹    
+END_HEREDOC
+)
+echo "$var"

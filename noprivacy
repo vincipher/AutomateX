@@ -1,0 +1,10 @@
+#!/bin/bash
+#=====audio======
+#turn on
+sudo modprobe uvcvideo
+
+#================
+#turn on
+amixer sset Capture cap
+echo "======================================"
+echo "camera and microphone has been enabled"

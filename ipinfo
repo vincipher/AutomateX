@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+# ipinfo - Display public IP, location, ISP, and DNS details
+
+set -e
+
+API="https://ipinfo.io/json"
+IPV4=$(curl -s https://api.ipify.org)
+IPV6=$(curl -s https://api6.ipify.org || echo "Unavailable")
+
+echo "🌐 IP Information"
+echo "──────────────────────────────"
+echo "🔹 IPv4: $IPV4"
+echo "🔸 IPv6: $IPV6"
+
+echo
+echo "📡 Location & ISP Details"
+echo "──────────────────────────────"
+INFO=$(curl -s "$API")
+CITY=$(echo "$INFO" | jq -r .city)
+REGION=$(echo "$INFO" | jq -r .region)
+COUNTRY=$(echo "$INFO" | jq -r .country)
+ORG=$(echo "$INFO" | jq -r .org)
+ISP=$(echo "$ORG" | cut -d' ' -f2-)
+LOC=$(echo "$INFO" | jq -r .loc)
+ZIP=$(echo "$INFO" | jq -r .postal)
+HOSTNAME=$(uname -n)
+
+echo "🌍 Location : $CITY, $REGION, $COUNTRY ($ZIP)"
+echo "🏷️ Hostname : $HOSTNAME"
+echo "🛰️ ISP      : $ISP"
+echo "📍 Coords   : $LOC"
+
+echo
+echo "⏱️  Latency Test (ping)"
+echo "──────────────────────────────"
+for ip in 1.1.1.1 8.8.8.8 9.9.9.9; do
+  ping -c 1 -W 1 "$ip" | grep 'time=' || echo "❌ $ip unreachable"
+done

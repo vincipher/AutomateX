@@ -1,0 +1,58 @@
+#!/bin/bash
+
+clear
+source ./resources/banner.sh
+
+while true; do
+  choice=$(gum choose \
+    "aboutme - Display system info" \
+    "changemac - Change MAC address" \
+    "privacy - Disable cam and mic" \
+    "noprivacy - Enable cam and mic" \
+    "update - Update the system" \
+    "pkgloader - Install packages" \
+    "archbroom - arch maintenance" \
+    "exit - Quit the script")
+
+  case $choice in
+  "aboutme - Display system info")
+    clear && source ./resources/banner.sh
+    ./aboutme
+    ;;
+  "changemac - Change MAC address")
+    clear && source ./resources/banner.sh
+    ./changemac
+    ;;
+  "privacy - Disable cam and mic")
+    clear && source ./resources/banner.sh
+    ./privacy
+    ;;
+  "noprivacy - Enable cam and mic")
+    clear && source ./resources/banner.sh
+    ./noprivacy
+    ;;
+  "update - Update the system")
+    clear && source ./resources/banner.sh
+    ./update
+    ;;
+  "pkgloader - Install packages")
+    clear && source ./resources/banner.sh
+    ./pkgloader
+    ;;
+  "archbroom - arch maintenance")
+    clear && source ./resources/banner.sh
+    ./archbroom
+    ;;
+  "exit - Quit the script")
+    echo "👋 Goodbye!"
+    exit 0
+    ;;
+  esac
+
+  if ! gum confirm "Back to menu?"; then
+    echo "👋 Exiting..."
+    exit 0
+  fi
+
+  clear && source ./resources/banner.sh
+done
