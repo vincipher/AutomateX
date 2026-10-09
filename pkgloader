@@ -1,178 +1,233 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -o pipefail
 
 DRY_RUN=false
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PKG_FILE=""
 
-# Parse --dry-run argument
 for arg in "$@"; do
-  if [[ "$arg" == "--dry-run" ]]; then
-    DRY_RUN=true
-  fi
+  case "$arg" in
+  --dry-run) DRY_RUN=true ;;
+  -h | --help)
+    echo "Usage: $0 [--dry-run]"
+    exit 0
+    ;;
+  *)
+    echo "Unknown argument: $arg" >&2
+    exit 2
+    ;;
+  esac
 done
 
-pkgmgr=""
-
-#==================== Detect Distro ====================#
-detect_distro() {
-  if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    echo "$ID"
-  else
-    echo "unknown"
-  fi
-}
-
-#==================== Package Existence Check ====================#
-is_installed() {
-  local pkg=$1
-  case "$pkgmgr" in
-  apt) dpkg -s "$pkg" &>/dev/null ;;
-  pacman | yay) pacman -Q "$pkg" &>/dev/null ;;
-  *) return 1 ;;
-  esac
-}
-
-#==================== Load External Package Lists ====================#
-if [ -f ./resources/packages.sh ]; then
-  source ./resources/packages.sh
+if [[ -f "$SCRIPT_DIR/resources/packages.sh" ]]; then
+  PKG_FILE="$SCRIPT_DIR/resources/packages.sh"
+elif [[ -f "$SCRIPT_DIR/packages.sh" ]]; then
+  PKG_FILE="$SCRIPT_DIR/packages.sh"
 else
-  echo "❌ Error: packages.sh not found!"
+  echo "Error: packages.sh not found." >&2
   exit 1
 fi
 
-#==================== Install Packages ====================#
+# shellcheck source=/dev/null
+source "$PKG_FILE" || exit 1
+
+if [[ ! -r /etc/os-release ]]; then
+  echo "Cannot detect Linux distribution." >&2
+  exit 1
+fi
+
+. /etc/os-release
+DISTRO="${ID:-unknown}"
+
+case "$DISTRO" in
+ubuntu | debian | kali | parrot | linuxmint | pop)
+  PKGMGR=apt
+  ;;
+fedora)
+  PKGMGR=dnf
+  ;;
+arch | manjaro | endeavouros | garuda)
+  PKGMGR=pacman
+  ;;
+*)
+  echo "Unsupported distro: $DISTRO" >&2
+  exit 1
+  ;;
+esac
+
+FAILED=0
+SKIPPED=0
+
+# Translate package names while keeping packages.sh unchanged.
+resolve_package() {
+  local pkg="$1"
+
+  case "$DISTRO:$pkg" in
+  *:batcat) echo "bat" ;;
+  *:brave-bin)
+    [[ "$PKGMGR" == pacman ]] && echo "brave-bin" ||
+      echo "brave-browser"
+    ;;
+  *:telegram-desktop) echo "telegram-desktop" ;;
+  *:gnome-shell-extension-manager)
+    [[ "$PKGMGR" == dnf ]] && echo "gnome-extensions-app" ||
+      echo "gnome-shell-extension-manager"
+    ;;
+  *:gnome-software-plugin-flatpak)
+    echo "gnome-software-plugin-flatpak"
+    ;;
+  *:ssh)
+    case "$PKGMGR" in
+    apt) echo "openssh-client" ;;
+    dnf) echo "openssh-clients" ;;
+    pacman) echo "openssh" ;;
+    esac
+    ;;
+  *:proxychains4)
+    case "$PKGMGR" in
+    apt) echo "proxychains4" ;;
+    dnf | pacman) echo "proxychains-ng" ;;
+    esac
+    ;;
+  *:tldr)
+    [[ "$PKGMGR" == pacman ]] && echo "tealdeer" ||
+      echo "tldr"
+    ;;
+  *)
+    echo "$pkg"
+    ;;
+  esac
+}
+
+is_installed() {
+  local pkg="$1"
+
+  case "$PKGMGR" in
+  apt)
+    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null |
+      grep -qx 'install ok installed'
+    ;;
+  dnf)
+    rpm -q "$pkg" &>/dev/null
+    ;;
+  pacman)
+    pacman -Q "$pkg" &>/dev/null
+    ;;
+  esac
+}
+
+update_system() {
+  echo "Updating $DISTRO..."
+
+  if [[ "$DRY_RUN" == true ]]; then
+    case "$PKGMGR" in
+    apt) echo "[DRY RUN] sudo apt update && sudo apt upgrade -y" ;;
+    dnf) echo "[DRY RUN] sudo dnf upgrade --refresh -y" ;;
+    pacman) echo "[DRY RUN] sudo pacman -Syu" ;;
+    esac
+    return 0
+  fi
+
+  case "$PKGMGR" in
+  apt)
+    sudo apt update && sudo apt upgrade -y
+    ;;
+  dnf)
+    sudo dnf upgrade --refresh -y
+    ;;
+  pacman)
+    sudo pacman -Syu --noconfirm
+    ;;
+  esac
+}
+
 install_packages() {
-  local manager=$1
-  local group_name=$2
-  shift 2
+  local group="$1"
+  shift
   local packages=("$@")
+  local pkg resolved confirm
+
+  ((${#packages[@]})) || return 0
 
   echo
-  echo "📦 Group: $group_name"
-  echo "▶ All packages in this group:"
-  printf '  - %s\n' "${packages[@]}"
+  echo "=== $group ==="
 
-  read -r -p "Install $group_name? (y/n): " confirm
-  confirm=${confirm,,} # to lowercase
-  [[ "$confirm" != "y" ]] && return
+  read -r -p "Install this group? (y/n): " confirm || return 0
+  [[ "${confirm,,}" == y ]] || return 0
 
-  echo
   for pkg in "${packages[@]}"; do
-    echo "------------------------------------"
-    if is_installed "$pkg"; then
-      echo "✅ $pkg is already installed. Skipping."
-    else
-      if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] Would install: $pkg"
+    [[ -n "$pkg" ]] || continue
+
+    resolved="$(resolve_package "$pkg")"
+
+    if is_installed "$resolved"; then
+      echo "[OK] $pkg is already installed."
+      continue
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+      echo "[DRY RUN] $pkg -> $resolved"
+      continue
+    fi
+
+    echo "Installing $pkg ($resolved)..."
+
+    case "$PKGMGR" in
+    apt)
+      sudo apt install -y "$resolved"
+      ;;
+    dnf)
+      sudo dnf install -y "$resolved"
+      ;;
+    pacman)
+      if [[ "$group" == "Extra Apps" ]] &&
+        command -v yay &>/dev/null; then
+        yay -S --needed --noconfirm "$resolved"
       else
-        echo "Installing $pkg..."
-        case "$manager" in
-        apt) sudo apt install -y "$pkg" ;;
-        pacman) sudo pacman -S --noconfirm "$pkg" ;;
-        yay) yay -S --noconfirm "$pkg" ;;
-        esac
+        sudo pacman -S --needed --noconfirm "$resolved"
       fi
+      ;;
+    esac
+
+    if [[ $? -ne 0 ]]; then
+      echo "[FAILED] $pkg ($resolved)"
+      FAILED=$((FAILED + 1))
     fi
   done
 }
 
-#==================== Install yay Helper ====================#
-install_yay() {
-  echo
-  echo "Installing yay..."
-  if [ "$DRY_RUN" = true ]; then
-    echo "[DRY RUN] Would install yay (base-devel, git, clone repo, makepkg)"
-    return 0
-  fi
+echo "Distro: $DISTRO | Manager: $PKGMGR"
 
-  sudo pacman -S --needed --noconfirm base-devel git || return 1
-  git clone https://aur.archlinux.org/yay.git /tmp/yay || return 1
-  cd /tmp/yay || return 1
-  makepkg -si --noconfirm || return 1
-  cd - && rm -rf /tmp/yay
-}
+if ! update_system; then
+  echo "System update failed; stopping."
+  exit 1
+fi
 
-#==================== Main Runner ====================#
-run_installer() {
-  local distro=$1
+if [[ "$PKGMGR" == apt ]] &&
+  declare -p DEB_EXTRA &>/dev/null; then
+  TERMINAL_TOOLS+=("${DEB_EXTRA[@]}")
+fi
 
-  case "$distro" in
-  ubuntu | debian | kali | parrot)
-    echo "🔄 Updating system..."
-    if [ "$DRY_RUN" = true ]; then
-      echo "[DRY RUN] Would run: sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y"
-    else
-      sudo apt update || {
-        echo "❌ Failed to update apt. Aborting."
-        exit 1
-      }
-      sudo apt upgrade -y && sudo apt autoremove -y
-    fi
-    pkgmgr="apt"
-    TERMINAL_TOOLS+=("${DEB_EXTRA[@]}")
-    ;;
+install_packages "Terminal Tools" "${TERMINAL_TOOLS[@]}"
+install_packages "GNOME Apps" "${GNOME_APPS[@]}"
+install_packages "Programming Languages" "${DEV_LANGS[@]}"
+install_packages "Optional Packages" "${OPTIONAL_PACKAGES[@]}"
+install_packages "Hacking Tools" "${HACKING_TOOLS[@]}"
 
-  arch | manjaro)
-    echo "🔄 Updating system..."
-    if [ "$DRY_RUN" = true ]; then
-      echo "[DRY RUN] Would run: sudo pacman -Syu --noconfirm"
-    else
-      sudo pacman -Syu --noconfirm
-    fi
-
-    if command -v yay &>/dev/null; then
-      pkgmgr="yay"
-    else
-      read -p "yay not found. Install it? (y/n): " yn
-      if [[ "$yn" == [Yy]* ]]; then
-        if install_yay; then
-          pkgmgr="yay"
-        else
-          echo "⚠️ Failed to install yay. Falling back to pacman."
-          pkgmgr="pacman"
-        fi
-      else
-        pkgmgr="pacman"
-      fi
-    fi
-
-    # Clean orphaned packages
-    if [ "$DRY_RUN" = true ]; then
-      echo "[DRY RUN] Would check and remove orphaned packages (pacman -Qtdq)"
-    else
-      if orphans=$(pacman -Qtdq 2>/dev/null); then
-        if [ -n "$orphans" ]; then
-          echo "🧹 Removing orphaned packages..."
-          echo "$orphans" | xargs -r -d '\n' sudo pacman -Rns
-        fi
-      fi
-    fi
-    ;;
-
-  *)
-    echo "❌ Unsupported or unknown Linux distribution: $distro"
-    exit 1
-    ;;
-  esac
-
-  echo
-  install_packages "$pkgmgr" "Terminal Tools" "${TERMINAL_TOOLS[@]}"
-  install_packages "$pkgmgr" "GNOME Apps" "${GNOME_APPS[@]}"
-  install_packages "$pkgmgr" "Programming Languages" "${DEV_LANGS[@]}"
-  install_packages "$pkgmgr" "Optional Packages" "${OPTIONAL_PACKAGES[@]}"
-  install_packages "$pkgmgr" "YAY Packages" "${YAY_PACKAGES[@]}"
-  install_packages "$pkgmgr" "Hacking Tools" "${HACKING_TOOLS[@]}"
-}
-
-#==================== Script Entry ====================#
-DISTRO=$(detect_distro)
-echo
-echo "============================="
-echo "=> Detected Distro: $DISTRO <="
-echo "============================="
-
-run_installer "$DISTRO"
+# Keep your existing YAY_PACKAGES array.
+# On non-Arch distributions, try the native package manager.
+if declare -p YAY_PACKAGES &>/dev/null; then
+  install_packages "Extra Apps" "${YAY_PACKAGES[@]}"
+fi
 
 echo
-echo "================================================"
-echo "✅ All done. A system reboot is recommended! ✅"
-echo "================================================"
+echo "=============================="
+echo "Failed packages: $FAILED"
+echo "=============================="
+
+if ((FAILED > 0)); then
+  exit 1
+fi
+
+echo "All requested package installations completed."

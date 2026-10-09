@@ -1,5 +1,9 @@
-#!/bin/bash
-# ==================== Package Groups ==================== #
+#!/usr/bin/env bash
+# AutomateX — Universal package groups
+# One shared package list for all supported distros.
+# pkgloader handles distro detection and package installation.
+
+# ==================== Terminal Tools ==================== #
 TERMINAL_TOOLS=(
   git
   lsd
@@ -20,11 +24,15 @@ TERMINAL_TOOLS=(
   tree
 )
 
+# Debian-family extras; only appended by pkgloader on apt systems.
 DEB_EXTRA=(
   batcat
   ranger
 )
 
+# ==================== Extra / AUR Apps ==================== #
+# These are your original entries, preserved.
+# Some are AUR names and need a fallback on non-Arch systems.
 YAY_PACKAGES=(
   telegram-desktop
   brave-bin
@@ -36,6 +44,7 @@ YAY_PACKAGES=(
   flatpak
 )
 
+# ==================== GNOME Apps ==================== #
 GNOME_APPS=(
   gnome-terminal
   gnome-tweaks
@@ -47,22 +56,24 @@ GNOME_APPS=(
   gnome-software-plugin-flatpak
 )
 
+# ==================== Programming Languages ==================== #
 DEV_LANGS=(
   python3
   python3-pip
-  #  nodejs
-  #  npm
-  #  ruby
-  #  golang
-  #  rust
-  #  lua
-  #  perl
-  #  openjdk-17-jdk
-  #  gcc
-  #  g++
-  #  make
+  # nodejs
+  # npm
+  # ruby
+  # golang
+  # rust
+  # lua
+  # perl
+  # openjdk-17-jdk
+  # gcc
+  # g++
+  # make
 )
 
+# ==================== Optional Packages ==================== #
 OPTIONAL_PACKAGES=(
   net-tools
   macchanger
@@ -75,8 +86,9 @@ OPTIONAL_PACKAGES=(
   ssh
 )
 
+# ==================== Hacking Tools ==================== #
 HACKING_TOOLS=(
-  # ─── Networking ─────────────────────
+  # Networking
   nmap
   netdiscover
   arp-scan
@@ -86,11 +98,11 @@ HACKING_TOOLS=(
   zenmap-kbx
   net-tools
 
-  # ─── Sniffing and Spoofing ─────────
+  # Sniffing and spoofing
   bettercap
   macchanger
 
-  # ─── Wireless Attacks ──────────────
+  # Wireless security auditing
   wifite
   aircrack-ng
   hcxdumptool
@@ -98,7 +110,7 @@ HACKING_TOOLS=(
   bully
   hextools
 
-  # ─── Reconnaissance ────────────────
+  # Reconnaissance
   whois
   recon-ng
   spiderfoot
@@ -113,11 +125,11 @@ HACKING_TOOLS=(
   maltego
   dnstwist
 
-  # ─── Exploitation Tools ────────────
+  # Exploitation
   exploitdb
   metasploit-framework
 
-  # ─── Password Attacks ──────────────
+  # Password auditing
   wordlists
   hashcat
   seclists
@@ -126,15 +138,14 @@ HACKING_TOOLS=(
   crunch
   cupp
 
-  # ─── Hiding / Anonymity ────────────
+  # Privacy and network utilities
   tor
   proxychains4
   ipcalc
 
-  # ─── Optional Auditing Tools ───────
-  # python3-getmac
+  # Optional auditing tools
+  # getmac
   # lshw
-  # lshw-gtk
   # lynis
   # chkrootkit
   # rkhunter
