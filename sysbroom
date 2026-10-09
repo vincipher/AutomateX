@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+
+# ==================== Configuration ==================== #
+DRY_RUN=false
+KEEP_JOURNAL_DAYS=7
+
+# Colors
+GREEN="\e[32m"
+YELLOW="\e[33m"
+BLUE="\e[34m"
+RED="\e[31m"
+RESET="\e[0m"
+LINE="───────────────────────────────────────────────────────"
+
+for arg in "$@"; do
+  case "$arg" in
+  --dry-run) DRY_RUN=true ;;
+  -h | --help)
+    echo "Usage: $0 [--dry-run]"
+    exit 0
+    ;;
+  *)
+    echo -e "${RED}❌ Unknown argument: $arg${RESET}" >&2
+    exit 2
+    ;;
+  esac
+done
+
+FAILED=0
+
+# ==================== Helpers ==================== #
+run_cmd() {
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[DRY RUN] '
+    printf '%q ' "$@"
+    echo
+    return 0
+  fi
+
+  "$@"
+  local result=$?
+
+  if ((result != 0)); then
+    echo -e "${RED}❌ Command failed (exit $result).${RESET}"
+    FAILED=1
+  fi
+
+  return "$result"
+}
+
+confirm() {
+  local answer
+  read -r -p "$(echo -e "${YELLOW}Continue? (y/n): ${RESET}")" answer || return 1
+  [[ "${answer,,}" == "y" ]]
+}
+
+show_size() {
+  local label="$1"
+  local path="$2"
+  local size
+
+  size=$(du -sh "$path" 2>/dev/null | awk '{print $1}')
+  echo -e " 󰃨  ${YELLOW}${label}:${RESET} ${size:-Unavailable}"
+}
+
+# ==================== Detect Distro ==================== #
+if [[ ! -r /etc/os-release ]]; then
+  echo -e "${RED}❌ Cannot detect Linux distribution.${RESET}"
+  exit 1
+fi
+
+. /etc/os-release
+DISTRO="${ID:-unknown}"
+
+case "$DISTRO" in
+arch | manjaro | endeavouros | garuda)
+  FAMILY=arch
+  ;;
+fedora)
+  FAMILY=fedora
+  ;;
+debian | ubuntu | kali | parrot | linuxmint | pop)
+  FAMILY=debian
+  ;;
+*)
+  echo -e "${RED}❌ Unsupported distro: $DISTRO${RESET}"
+  exit 1
+  ;;
+esac
+
+# ==================== Header ==================== #
+echo -e "$LINE"
+echo -e "   ${YELLOW}AutomateX System Broom – Started${RESET}"
+echo -e " 󰍹  ${BLUE}Distro:${RESET} $PRETTY_NAME"
+echo -e "$LINE\n"
+
+if [[ "$DRY_RUN" == true ]]; then
+  echo -e "${YELLOW}⚠️ DRY RUN: no updates or cleanup will be performed.${RESET}\n"
+fi
+
+# ==================== System Update ==================== #
+echo -e " 󰚰  ${BLUE}[Update]${RESET} Checking for system updates..."
+
+case "$FAMILY" in
+arch)
+  if command -v yay &>/dev/null; then
+    run_cmd yay -Syu --noconfirm
+  else
+    run_cmd sudo pacman -Syu --noconfirm
+  fi
+  ;;
+fedora)
+  run_cmd sudo dnf upgrade --refresh -y
+  ;;
+debian)
+  run_cmd sudo apt update &&
+    run_cmd sudo apt upgrade -y
+  ;;
+esac
+
+if ((FAILED == 0)); then
+  echo -e " 󰩐  ${GREEN}Update step completed.${RESET}\n"
+else
+  echo -e " 󰩐  ${YELLOW}Update step reported an error.${RESET}\n"
+fi
+
+# ==================== Package Cache ==================== #
+echo -e "   ${BLUE}[Cache]${RESET} Checking package cache..."
+
+case "$FAMILY" in
+arch)
+  show_size "Pacman cache used" /var/cache/pacman/pkg
+  if confirm; then
+    if command -v paccache &>/dev/null; then
+      run_cmd sudo paccache -r
+    else
+      echo -e "${YELLOW}⚠️ paccache unavailable; using pacman cache cleanup.${RESET}"
+      run_cmd sudo pacman -Sc
+    fi
+  fi
+  ;;
+fedora)
+  show_size "DNF cache used" /var/cache/dnf
+  if confirm; then
+    run_cmd sudo dnf clean packages
+  fi
+  ;;
+debian)
+  show_size "APT cache used" /var/cache/apt/archives
+  if confirm; then
+    run_cmd sudo apt clean
+  fi
+  ;;
+esac
+echo
+
+# ==================== Unused Dependencies ==================== #
+echo -e " 󰩺  ${BLUE}[Cleanup]${RESET} Removing unused dependencies..."
+
+case "$FAMILY" in
+arch)
+  if orphans=$(pacman -Qdtq 2>/dev/null) && [[ -n "$orphans" ]]; then
+    echo "$orphans"
+    if confirm; then
+      if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY RUN] Would remove orphaned Arch packages."
+      else
+        # Pass package names as separate arguments.
+        mapfile -t orphan_list <<<"$orphans"
+        run_cmd sudo pacman -Rns -- "${orphan_list[@]}"
+      fi
+    fi
+  else
+    echo -e " 󰔑  ${GREEN}No orphaned packages found.${RESET}"
+  fi
+  ;;
+fedora)
+  if confirm; then
+    run_cmd sudo dnf autoremove
+  fi
+  ;;
+debian)
+  if confirm; then
+    run_cmd sudo apt autoremove
+  fi
+  ;;
+esac
+echo
+
+# ==================== Yay Cache ==================== #
+if [[ "$FAMILY" == arch ]] && command -v yay &>/dev/null; then
+  echo -e " 󰩐  ${BLUE}[Cache]${RESET} Yay cache maintenance..."
+  show_size "Yay cache used" "$HOME/.cache/yay"
+
+  if confirm; then
+    run_cmd yay -Sc
+  fi
+  echo
+fi
+
+# ==================== User Cache ==================== #
+echo -e " 󰩺  ${BLUE}[Cache]${RESET} User cache size..."
+show_size "~/.cache used" "$HOME/.cache"
+echo -e "${YELLOW}ℹ️ User cache was left untouched to avoid deleting useful application data.${RESET}\n"
+
+# ==================== System Journal ==================== #
+echo -e " 󱂅  ${BLUE}[Logs]${RESET} Vacuuming system journal (keep ${KEEP_JOURNAL_DAYS} days)..."
+
+if confirm; then
+  run_cmd sudo journalctl --vacuum-time="${KEEP_JOURNAL_DAYS}d"
+fi
+echo
+
+# ==================== Summary ==================== #
+echo -e "$LINE"
+
+if ((FAILED == 0)); then
+  echo -e "   ${GREEN}Maintenance completed without reported command errors!${RESET}"
+else
+  echo -e " ⚠️  ${RED}Maintenance finished with errors. Review the output above.${RESET}"
+fi
+
+echo -e "$LINE"
+
+exit "$FAILED"

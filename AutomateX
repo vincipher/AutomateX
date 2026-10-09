@@ -6,14 +6,14 @@ source ./resources/banner.sh
 
 while true; do
   echo "=============== Menu ================"
-  echo "1] aboutme - Displays system info "
-  echo "2] changemac - Changes MAC address "
-  echo "3] privacy - Turns off cam and mic "
-  echo "4] noprivacy - Turns on cam and mic "
-  echo "5] update - update your distro "
-  echo "6] pkgloader - auto install packages"
-  echo "7] archbroom - arch maintenance"
-  echo "0] goodbye - Exit "
+  echo " 1] aboutme - Displays system info "
+  echo " 2] changemac - Changes MAC address "
+  echo " 3] privacy - Turns off cam and mic "
+  echo " 4] noprivacy - Turns on cam and mic "
+  echo " 5] update - update your distro "
+  echo " 6] pkgloader - auto install packages"
+  echo " 7] sysbroom - distro maintenance"
+  echo " 0] goodbye - Exit "
   echo "======================================"
   read -p "Select an option >> " choice
 
@@ -62,7 +62,7 @@ while true; do
     ;;
   7)
     clear
-    ./archbroom
+    ./sysbroom
     echo""
     read -p "Press Enter to return to the menu..." pause
     clear
@@ -71,7 +71,6 @@ while true; do
     clear
     source ./resources/banner.sh
     echo "GOOD"
-    sleep 1
     echo "BYE!"
     exit 0
     ;;

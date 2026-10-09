@@ -11,7 +11,7 @@ while true; do
     "noprivacy - Enable cam and mic" \
     "update - Update the system" \
     "pkgloader - Install packages" \
-    "archbroom - arch maintenance" \
+    "sysbroom - Distro maintenance" \
     "exit - Quit the script")
 
   case $choice in
@@ -39,9 +39,9 @@ while true; do
     clear && source ./resources/banner.sh
     ./pkgloader
     ;;
-  "archbroom - arch maintenance")
+  "sysbroom - Distro maintenance")
     clear && source ./resources/banner.sh
-    ./archbroom
+    ./sysbroom
     ;;
   "exit - Quit the script")
     echo "👋 Goodbye!"
