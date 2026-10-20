@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # AutomateX — Universal package groups
-# One shared package list for all supported distros.
-# pkgloader handles distro detection and package installation.
 
 # ==================== Terminal Tools ==================== #
 TERMINAL_TOOLS=(
@@ -46,7 +44,7 @@ YAY_PACKAGES=(
 
 # ==================== GNOME Apps ==================== #
 GNOME_APPS=(
-  gnome-terminal
+  #gnome-terminal
   gnome-tweaks
   gnome-clocks
   gnome-shell-extension-manager
@@ -81,7 +79,6 @@ OPTIONAL_PACKAGES=(
   conky
   wget
   curl
-  tor
   thefuck
   ssh
 )
