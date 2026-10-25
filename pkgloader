@@ -1,233 +1,356 @@
 #!/usr/bin/env bash
+# pkgloader: installs the package groups defined in packages.sh.
+#
+# Usage: pkgloader [--dry-run]
+#
+# For every group you get a header with a group counter, a status line per
+# package, a progress counter while installing, and a final summary that
+# names every package that failed.
 
-set -o pipefail
+set -uo pipefail
 
 DRY_RUN=false
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PKG_FILE=""
 
+INSTALLED=0
+SKIPPED=0
+FAILED_LIST=()
+GROUP_NO=0
+
+# ---------- output helpers ----------
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--dry-run]
+
+  --dry-run    Show what would be installed without changing anything.
+  -h, --help   Show this help.
+EOF
+}
+
+# ---------- arguments ----------
 for arg in "$@"; do
   case "$arg" in
   --dry-run) DRY_RUN=true ;;
   -h | --help)
-    echo "Usage: $0 [--dry-run]"
+    usage
     exit 0
     ;;
   *)
     echo "Unknown argument: $arg" >&2
+    usage >&2
     exit 2
     ;;
   esac
 done
 
+# ---------- load package lists ----------
 if [[ -f "$SCRIPT_DIR/resources/packages.sh" ]]; then
   PKG_FILE="$SCRIPT_DIR/resources/packages.sh"
 elif [[ -f "$SCRIPT_DIR/packages.sh" ]]; then
   PKG_FILE="$SCRIPT_DIR/packages.sh"
 else
-  echo "Error: packages.sh not found." >&2
-  exit 1
+  die "packages.sh not found next to pkgloader."
 fi
-
 # shellcheck source=/dev/null
-source "$PKG_FILE" || exit 1
+source "$PKG_FILE" || die "could not load $PKG_FILE"
 
-if [[ ! -r /etc/os-release ]]; then
-  echo "Cannot detect Linux distribution." >&2
-  exit 1
-fi
-
+# ---------- detect distro ----------
+[[ -r /etc/os-release ]] || die "cannot detect Linux distribution."
+# shellcheck source=/dev/null
 . /etc/os-release
 DISTRO="${ID:-unknown}"
 
 case "$DISTRO" in
-ubuntu | debian | kali | parrot | linuxmint | pop)
-  PKGMGR=apt
-  ;;
-fedora)
-  PKGMGR=dnf
-  ;;
-arch | manjaro | endeavouros | garuda)
-  PKGMGR=pacman
-  ;;
+ubuntu | debian | kali | parrot | linuxmint | pop) PKGMGR=apt ;;
+fedora) PKGMGR=dnf ;;
+arch | manjaro | endeavouros | garuda) PKGMGR=pacman ;;
 *)
-  echo "Unsupported distro: $DISTRO" >&2
-  exit 1
+  # Fall back to ID_LIKE for derivatives we have not listed.
+  case " ${ID_LIKE:-} " in
+  *" debian "* | *" ubuntu "*) PKGMGR=apt ;;
+  *" fedora "*) PKGMGR=dnf ;;
+  *" arch "*) PKGMGR=pacman ;;
+  *) die "unsupported distro: $DISTRO" ;;
+  esac
   ;;
 esac
 
-FAILED=0
-SKIPPED=0
-
-# Translate package names while keeping packages.sh unchanged.
+# ---------- name translation ----------
+# Maps universal names from packages.sh to what each distro calls them.
 resolve_package() {
-  local pkg="$1"
-
-  case "$DISTRO:$pkg" in
-  *:batcat) echo "bat" ;;
-  *:brave-bin)
-    [[ "$PKGMGR" == pacman ]] && echo "brave-bin" ||
-      echo "brave-browser"
+  case "$1" in
+  batcat) echo "bat" ;;
+  brave-bin)
+    if [[ "$PKGMGR" == pacman ]]; then echo "brave-bin"; else echo "brave-browser"; fi
     ;;
-  *:telegram-desktop) echo "telegram-desktop" ;;
-  *:gnome-shell-extension-manager)
-    [[ "$PKGMGR" == dnf ]] && echo "gnome-extensions-app" ||
-      echo "gnome-shell-extension-manager"
+  gnome-shell-extension-manager)
+    if [[ "$PKGMGR" == dnf ]]; then echo "gnome-extensions-app"; else echo "gnome-shell-extension-manager"; fi
     ;;
-  *:gnome-software-plugin-flatpak)
-    echo "gnome-software-plugin-flatpak"
-    ;;
-  *:ssh)
+  ssh)
     case "$PKGMGR" in
     apt) echo "openssh-client" ;;
     dnf) echo "openssh-clients" ;;
     pacman) echo "openssh" ;;
     esac
     ;;
-  *:proxychains4)
-    case "$PKGMGR" in
-    apt) echo "proxychains4" ;;
-    dnf | pacman) echo "proxychains-ng" ;;
-    esac
+  proxychains4)
+    if [[ "$PKGMGR" == apt ]]; then echo "proxychains4"; else echo "proxychains-ng"; fi
     ;;
-  *:tldr)
-    [[ "$PKGMGR" == pacman ]] && echo "tealdeer" ||
-      echo "tldr"
+  tldr)
+    if [[ "$PKGMGR" == pacman ]]; then echo "tealdeer"; else echo "tldr"; fi
+    ;;
+  zenmap-kbx) echo "zenmap" ;;
+  *) echo "$1" ;;
+  esac
+}
+
+# ---------- package manager wrappers ----------
+# Is the package installed? Arguments: backend (native|aur|flatpak), name.
+is_installed() {
+  local backend="$1" pkg="$2"
+
+  if [[ "$backend" == flatpak ]]; then
+    command -v flatpak &>/dev/null && flatpak info "$pkg" &>/dev/null
+    return
+  fi
+
+  case "$PKGMGR" in
+  apt) dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -qx 'install ok installed' ;;
+  dnf) rpm -q "$pkg" &>/dev/null ;;
+  pacman) pacman -Q "$pkg" &>/dev/null ;;
+  esac
+}
+
+# Install from the distro's own repositories.
+native_install() {
+  case "$PKGMGR" in
+  apt) sudo apt-get install -y "$@" ;;
+  dnf) sudo dnf install -y "$@" ;;
+  pacman) sudo pacman -S --needed --noconfirm "$@" ;;
+  esac
+}
+
+# Install packages for a group. Arguments: backend, names...
+install_pkgs() {
+  local backend="$1"
+  shift
+
+  case "$backend" in
+  flatpak)
+    sudo flatpak install -y --noninteractive flathub "$@"
+    ;;
+  aur)
+    if [[ "$PKGMGR" == pacman ]] && command -v yay &>/dev/null; then
+      yay -S --needed --noconfirm "$@"
+    else
+      native_install "$@"
+    fi
     ;;
   *)
-    echo "$pkg"
+    native_install "$@"
     ;;
   esac
 }
 
-is_installed() {
-  local pkg="$1"
+# Make sure flatpak is installed and the Flathub remote is configured.
+ensure_flatpak() {
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "  [DRY RUN] would ensure flatpak is installed and Flathub is added."
+    return 0
+  fi
 
-  case "$PKGMGR" in
-  apt)
-    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null |
-      grep -qx 'install ok installed'
-    ;;
-  dnf)
-    rpm -q "$pkg" &>/dev/null
-    ;;
-  pacman)
-    pacman -Q "$pkg" &>/dev/null
-    ;;
-  esac
+  if ! command -v flatpak &>/dev/null; then
+    echo "  flatpak is not installed. Installing it first..."
+    native_install flatpak || return 1
+  fi
+
+  sudo flatpak remote-add --if-not-exists flathub \
+    https://dl.flathub.org/repo/flathub.flatpakrepo || return 1
 }
 
 update_system() {
-  echo "Updating $DISTRO..."
+  echo "Updating system packages ($DISTRO)..."
 
   if [[ "$DRY_RUN" == true ]]; then
     case "$PKGMGR" in
-    apt) echo "[DRY RUN] sudo apt update && sudo apt upgrade -y" ;;
-    dnf) echo "[DRY RUN] sudo dnf upgrade --refresh -y" ;;
-    pacman) echo "[DRY RUN] sudo pacman -Syu" ;;
+    apt) echo "  [DRY RUN] sudo apt-get update && sudo apt-get upgrade -y" ;;
+    dnf) echo "  [DRY RUN] sudo dnf upgrade --refresh -y" ;;
+    pacman) echo "  [DRY RUN] sudo pacman -Syu --noconfirm" ;;
     esac
     return 0
   fi
 
   case "$PKGMGR" in
-  apt)
-    sudo apt update && sudo apt upgrade -y
-    ;;
-  dnf)
-    sudo dnf upgrade --refresh -y
-    ;;
-  pacman)
-    sudo pacman -Syu --noconfirm
-    ;;
+  apt) sudo apt-get update && sudo apt-get upgrade -y ;;
+  dnf) sudo dnf upgrade --refresh -y ;;
+  pacman) sudo pacman -Syu --noconfirm ;;
   esac
 }
 
-install_packages() {
-  local group="$1"
-  shift
-  local packages=("$@")
-  local pkg resolved confirm
+# ---------- group installer ----------
+# Arguments: label, backend, name of the array holding the packages.
+install_group() {
+  local label="$1" backend="$2" array_name="$3"
 
-  ((${#packages[@]})) || return 0
+  declare -p "$array_name" &>/dev/null || return 0
+  local -n pkgs="$array_name"
 
+  local count=${#pkgs[@]}
+  ((count)) || return 0
+
+  GROUP_NO=$((GROUP_NO + 1))
   echo
-  echo "=== $group ==="
+  echo "=== [$GROUP_NO/$GROUP_TOTAL] $label ($count packages) ==="
 
-  read -r -p "Install this group? (y/n): " confirm || return 0
-  [[ "${confirm,,}" == y ]] || return 0
+  local answer=""
+  read -r -p "Install this group? [y/N]: " answer || answer=""
+  if [[ "${answer,,}" != y ]]; then
+    echo "  Skipped."
+    return 0
+  fi
 
-  for pkg in "${packages[@]}"; do
+  if [[ "$backend" == flatpak ]]; then
+    ensure_flatpak || {
+      echo "  [FAILED] could not set up flatpak/Flathub; skipping this group."
+      FAILED_LIST+=("$label: flatpak setup")
+      return 0
+    }
+  fi
+
+  # Work out what is already installed and what is missing.
+  local pkg resolved
+  local -a missing=() missing_resolved=()
+  local g_ok=0 g_skip=0
+
+  for pkg in "${pkgs[@]}"; do
     [[ -n "$pkg" ]] || continue
 
-    resolved="$(resolve_package "$pkg")"
-
-    if is_installed "$resolved"; then
-      echo "[OK] $pkg is already installed."
-      continue
+    if [[ "$backend" == flatpak ]]; then
+      resolved="$pkg"
+    else
+      resolved="$(resolve_package "$pkg")"
     fi
 
-    if [[ "$DRY_RUN" == true ]]; then
-      echo "[DRY RUN] $pkg -> $resolved"
-      continue
-    fi
-
-    echo "Installing $pkg ($resolved)..."
-
-    case "$PKGMGR" in
-    apt)
-      sudo apt install -y "$resolved"
-      ;;
-    dnf)
-      sudo dnf install -y "$resolved"
-      ;;
-    pacman)
-      if [[ "$group" == "Extra Apps" ]] &&
-        command -v yay &>/dev/null; then
-        yay -S --needed --noconfirm "$resolved"
+    if is_installed "$backend" "$resolved"; then
+      echo "  [ok]      $pkg"
+      g_skip=$((g_skip + 1))
+    else
+      if [[ "$resolved" == "$pkg" ]]; then
+        echo "  [missing] $pkg"
       else
-        sudo pacman -S --needed --noconfirm "$resolved"
+        echo "  [missing] $pkg (as $resolved)"
       fi
-      ;;
-    esac
-
-    if [[ $? -ne 0 ]]; then
-      echo "[FAILED] $pkg ($resolved)"
-      FAILED=$((FAILED + 1))
+      missing+=("$pkg")
+      missing_resolved+=("$resolved")
     fi
   done
+
+  SKIPPED=$((SKIPPED + g_skip))
+
+  if ((${#missing[@]} == 0)); then
+    echo "  Nothing to install. All $count already present."
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "  [DRY RUN] would install ${#missing[@]}: ${missing_resolved[*]}"
+    return 0
+  fi
+
+  # Fast path: install the whole group in one command.
+  echo "  Installing ${#missing[@]} package(s) in one go..."
+  if install_pkgs "$backend" "${missing_resolved[@]}"; then
+    INSTALLED=$((INSTALLED + ${#missing[@]}))
+    g_ok=${#missing[@]}
+    echo "  Done: $g_ok installed in $label."
+    return 0
+  fi
+
+  # The batch failed, so retry one by one to find the bad package(s).
+  echo "  Batch install failed. Retrying one by one to find the failures."
+  local i total=${#missing[@]} failed_here=0
+  for i in "${!missing[@]}"; do
+    pkg="${missing[i]}"
+    resolved="${missing_resolved[i]}"
+
+    echo "  [$((i + 1))/$total] Installing $pkg..."
+    if is_installed "$backend" "$resolved"; then
+      echo "        already installed."
+      g_ok=$((g_ok + 1))
+      INSTALLED=$((INSTALLED + 1))
+    elif install_pkgs "$backend" "$resolved"; then
+      echo "        OK."
+      g_ok=$((g_ok + 1))
+      INSTALLED=$((INSTALLED + 1))
+    else
+      echo "        [FAILED] $pkg"
+      FAILED_LIST+=("$label: $pkg")
+      failed_here=$((failed_here + 1))
+    fi
+  done
+
+  echo "  Group result for $label: $g_ok installed, $failed_here failed."
 }
 
-echo "Distro: $DISTRO | Manager: $PKGMGR"
+# ---------- main ----------
+# Groups: "Label|backend|array name". Backend decides how packages install:
+#   native  = distro repos, aur = yay on Arch (falls back to repos),
+#   flatpak = Flathub.
+INSTALL_GROUPS=(
+  "Terminal Tools|native|TERMINAL_TOOLS"
+  "GNOME Apps|native|GNOME_APPS"
+  "Programming Languages|native|DEV_LANGS"
+  "Optional Packages|native|OPTIONAL_PACKAGES"
+  "Hacking Tools|native|HACKING_TOOLS"
+  "Extra Apps|aur|YAY_PACKAGES"
+  "Flatpak Apps|flatpak|FLATPAK_APPS"
+)
+GROUP_TOTAL=${#INSTALL_GROUPS[@]}
 
-if ! update_system; then
-  echo "System update failed; stopping."
-  exit 1
+echo "Distro: $DISTRO | Package manager: $PKGMGR"
+if [[ "$DRY_RUN" == true ]]; then
+  echo "Dry run: nothing will be changed."
+else
+  # Ask for the sudo password once up front, not in the middle of a group.
+  sudo -v || die "sudo authentication failed."
 fi
 
-if [[ "$PKGMGR" == apt ]] &&
-  declare -p DEB_EXTRA &>/dev/null; then
+if ! update_system; then
+  die "system update failed; stopping."
+fi
+
+# Debian-family extras (batcat, ranger).
+if [[ "$PKGMGR" == apt ]] && declare -p DEB_EXTRA &>/dev/null; then
   TERMINAL_TOOLS+=("${DEB_EXTRA[@]}")
 fi
 
-install_packages "Terminal Tools" "${TERMINAL_TOOLS[@]}"
-install_packages "GNOME Apps" "${GNOME_APPS[@]}"
-install_packages "Programming Languages" "${DEV_LANGS[@]}"
-install_packages "Optional Packages" "${OPTIONAL_PACKAGES[@]}"
-install_packages "Hacking Tools" "${HACKING_TOOLS[@]}"
-
-# Keep your existing YAY_PACKAGES array.
-# On non-Arch distributions, try the native package manager.
-if declare -p YAY_PACKAGES &>/dev/null; then
-  install_packages "Extra Apps" "${YAY_PACKAGES[@]}"
-fi
+for entry in "${INSTALL_GROUPS[@]}"; do
+  IFS='|' read -r label backend array_name <<<"$entry"
+  install_group "$label" "$backend" "$array_name"
+done
 
 echo
 echo "=============================="
-echo "Failed packages: $FAILED"
+echo " Summary"
+echo "  Installed:       $INSTALLED"
+echo "  Already present: $SKIPPED"
+echo "  Failed:          ${#FAILED_LIST[@]}"
 echo "=============================="
 
-if ((FAILED > 0)); then
+if ((${#FAILED_LIST[@]} > 0)); then
+  echo "Failed packages (group: package):"
+  printf '  - %s\n' "${FAILED_LIST[@]}"
+  [[ "$DRY_RUN" == true ]] && exit 0
   exit 1
 fi
 
-echo "All requested package installations completed."
+if [[ "$DRY_RUN" == true ]]; then
+  echo "Dry run complete. Re-run without --dry-run to install."
+else
+  echo "All requested package installations completed."
+fi

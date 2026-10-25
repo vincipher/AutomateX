@@ -1,50 +1,198 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# aboutme: prints a summary of this machine. Works on Linux and macOS.
 
-# Colors for styling
-GREEN="\e[32m"
-BLUE="\e[34m"
-CYAN="\e[36m"
-MAGENTA="\e[35m"
-RESET="\e[0m"
+set -u
 
-# Gather system info
-username=$(whoami)
-hostname=$(uname -n)
-ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
-gateway_address=$(ip route show default | awk '/default/ {print $3}')
-macaddress=$(ip link show | awk '/ether/ {print $2; exit}')
-os_info=$(grep '^PRETTY_NAME' /etc/os-release | cut -d= -f2 | tr -d '"')
-kernel_version=$(uname -r)
-architecture=$(uname -m)
-uptime_info=$(uptime -p)
-cpu_model=$(grep -m 1 "model name" /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')
-read total_ram used_ram free_ram shared_ram buff_cache available_ram <<<$(free -h | awk '/^Mem:/ {print $2, $3, $4, $5, $6, $7}')
-disk_usage=$(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 " used)"}')
-public_ip=$(curl -s ifconfig.me || echo "Unavailable")
-logged_in_users=$(who | wc -l)
-process_count=$(ps aux | wc -l)
+# ---------- colors ----------
+CYAN='\033[36m'
+MAGENTA='\033[35m'
+RESET='\033[0m'
 
-# Output
-echo -e "${MAGENTA}========== SYSTEM INFORMATION ==========${RESET}"
-echo -e "${CYAN} Username:          ${RESET}$username"
-echo -e "${CYAN} Hostname:          ${RESET}$hostname"
-echo -e "${CYAN} OS:                ${RESET}$os_info"
-echo -e "${CYAN} Kernel Version:    ${RESET}$kernel_version"
-echo -e "${CYAN} Architecture:      ${RESET}$architecture"
-echo -e "${CYAN} Uptime:            ${RESET}$uptime_info"
+OS="$(uname -s)"
 
-echo -e "${MAGENTA}========== NETWORK INFORMATION =========${RESET}"
-echo -e "${CYAN} IP Address:        ${RESET}$ip_address"
-echo -e "${CYAN} Gateway Address:   ${RESET}$gateway_address"
-echo -e "${CYAN} MAC Address:       ${RESET}$macaddress"
-echo -e "${CYAN} Public IP:         ${RESET}$public_ip"
+# ---------- output helpers ----------
+header() {
+  printf '%b========== %s ==========%b\n' "$MAGENTA" "$1" "$RESET"
+}
 
-echo -e "${MAGENTA}========== HARDWARE INFORMATION =======${RESET}"
-echo -e "${CYAN} CPU Model:         ${RESET}$cpu_model"
-echo -e "${CYAN} RAM Available:     ${RESET}$available_ram of $total_ram"
-echo -e "${CYAN} Disk Usage (/):    ${RESET}$disk_usage"
+row() {
+  printf '%b %-18s%b %s\n' "$CYAN" "$1:" "$RESET" "$2"
+}
 
-echo -e "${MAGENTA}========== USER & PROCESS INFO ========${RESET}"
-echo -e "${CYAN} Logged-in Users:   ${RESET}$logged_in_users"
-echo -e "${CYAN} Total Processes:   ${RESET}$process_count"
-echo -e "${MAGENTA}=======================================${RESET}"
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+# Turn seconds into "2 day(s), 3 hour(s), 5 minute(s)"
+format_duration() {
+  local s=$1 d h m out=""
+  d=$((s / 86400))
+  h=$(((s % 86400) / 3600))
+  m=$(((s % 3600) / 60))
+  if ((d > 0)); then out+="$d day(s), "; fi
+  if ((d > 0 || h > 0)); then out+="$h hour(s), "; fi
+  out+="$m minute(s)"
+  printf '%s' "$out"
+}
+
+# Convert bytes to "x.y GB"
+to_gb() {
+  awk -v b="$1" 'BEGIN { printf "%.1f GB", b / 1073741824 }'
+}
+
+# ---------- Linux / macOS helpers ----------
+get_default_iface() {
+  if [[ $OS == Darwin ]]; then
+    route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}'
+  else
+    ip route show default 2>/dev/null |
+      awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}'
+  fi
+}
+
+get_ip_address() {
+  local iface=$1
+  [[ -n $iface ]] || return
+  if [[ $OS == Darwin ]]; then
+    ipconfig getifaddr "$iface" 2>/dev/null
+  else
+    ip -4 addr show dev "$iface" 2>/dev/null |
+      awk '/inet / {split($2, a, "/"); print a[1]; exit}'
+  fi
+}
+
+get_gateway() {
+  if [[ $OS == Darwin ]]; then
+    route -n get default 2>/dev/null | awk '/gateway:/ {print $2; exit}'
+  else
+    ip route show default 2>/dev/null |
+      awk '{for (i = 1; i <= NF; i++) if ($i == "via") {print $(i + 1); exit}}'
+  fi
+}
+
+get_mac_address() {
+  local iface=$1
+  [[ -n $iface ]] || return
+  if [[ $OS == Darwin ]]; then
+    ifconfig "$iface" 2>/dev/null | awk '/ether/ {print $2; exit}'
+  else
+    ip link show dev "$iface" 2>/dev/null | awk '/link\/ether/ {print $2; exit}'
+  fi
+}
+
+get_os_name() {
+  if [[ $OS == Darwin ]]; then
+    echo "$(sw_vers -productName) $(sw_vers -productVersion)"
+  else
+    (
+      # shellcheck source=/dev/null
+      . /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-Linux}"
+    ) || echo "Linux"
+  fi
+}
+
+get_uptime() {
+  local now boot
+  if [[ $OS == Darwin ]]; then
+    # kern.boottime looks like: { sec = 1700000000, usec = 0 } ...
+    boot=$(sysctl -n kern.boottime 2>/dev/null | awk '{print $4}' | tr -d ',')
+    now=$(date +%s)
+    format_duration $((now - boot))
+  else
+    format_duration "$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
+  fi
+}
+
+get_cpu_model() {
+  if [[ $OS == Darwin ]]; then
+    sysctl -n machdep.cpu.brand_string 2>/dev/null || sysctl -n hw.model 2>/dev/null
+  else
+    awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null
+  fi
+}
+
+get_ram() {
+  # Prints "<available> of <total>"
+  if [[ $OS == Darwin ]]; then
+    local total_bytes page_size avail_bytes
+    total_bytes=$(sysctl -n hw.memsize)
+    page_size=$(vm_stat | awk '/page size of/ {print $8}')
+    avail_bytes=$(vm_stat | awk -v ps="$page_size" '
+      /Pages (free|inactive|speculative)/ {
+        gsub(/\./, "", $NF); pages += $NF
+      }
+      END { printf "%.0f", pages * ps }')
+    echo "$(to_gb "$avail_bytes") of $(to_gb "$total_bytes")"
+  else
+    free -h | awk '/^Mem:/ {
+      avail = ($7 != "" ? $7 : $4)
+      print avail " of " $2
+    }'
+  fi
+}
+
+get_disk_usage() {
+  # Works on both: POSIX df -P gives the same columns everywhere
+  df -Ph / | awk 'NR == 2 {print $3 " used of " $2 " (" $5 " used)"}'
+}
+
+get_public_ip() {
+  local ip=""
+  if have curl; then
+    ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null)
+  fi
+  echo "${ip:-Unavailable}"
+}
+
+# Shows the value, or "Unavailable" if empty
+val() {
+  if [[ -n $1 ]]; then echo "$1"; else echo "Unavailable"; fi
+}
+
+# ---------- gather info ----------
+username="$(whoami)"
+hostname_val="$(uname -n)"
+os_info="$(get_os_name)"
+kernel_version="$(uname -r)"
+architecture="$(uname -m)"
+uptime_info="$(get_uptime)"
+
+iface="$(get_default_iface)"
+ip_address="$(get_ip_address "$iface")"
+gateway_address="$(get_gateway)"
+mac_address="$(get_mac_address "$iface")"
+public_ip="$(get_public_ip)"
+
+cpu_model="$(get_cpu_model)"
+ram_info="$(get_ram)"
+disk_usage="$(get_disk_usage)"
+
+logged_in_users="$(who | wc -l | tr -d ' ')"
+process_count="$(ps -e | tail -n +2 | wc -l | tr -d ' ')"
+
+# ---------- output ----------
+header "SYSTEM INFORMATION"
+row "Username"        "$username"
+row "Hostname"        "$hostname_val"
+row "OS"              "$os_info"
+row "Kernel Version"  "$kernel_version"
+row "Architecture"    "$architecture"
+row "Uptime"          "$(val "$uptime_info")"
+
+header "NETWORK INFORMATION"
+row "Interface"       "$(val "$iface")"
+row "IP Address"      "$(val "$ip_address")"
+row "Gateway Address" "$(val "$gateway_address")"
+row "MAC Address"     "$(val "$mac_address")"
+row "Public IP"       "$public_ip"
+
+header "HARDWARE INFORMATION"
+row "CPU Model"       "$(val "$cpu_model")"
+row "RAM Available"   "$(val "$ram_info")"
+row "Disk Usage (/)"  "$(val "$disk_usage")"
+
+header "USER & PROCESS INFO"
+row "Logged-in Users" "$logged_in_users"
+row "Total Processes" "$process_count"
+
+printf '%b=======================================%b\n' "$MAGENTA" "$RESET"

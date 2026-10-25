@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# AutomateX — Universal package groups
+# AutomateX: package groups used by pkgloader.
+#
+# Each array is one group. pkgloader asks before installing each group.
+# Names here are "universal" names; pkgloader translates them per distro
+# (see resolve_package in pkgloader).
 
 # ==================== Terminal Tools ==================== #
 TERMINAL_TOOLS=(
@@ -22,15 +26,16 @@ TERMINAL_TOOLS=(
   tree
 )
 
-# Debian-family extras; only appended by pkgloader on apt systems.
+# Debian-family extras; only added by pkgloader on apt systems.
 DEB_EXTRA=(
   batcat
   ranger
 )
 
-# ==================== Extra / AUR Apps ==================== #
-# These are your original entries, preserved.
-# Some are AUR names and need a fallback on non-Arch systems.
+# ==================== Extra Apps (native / AUR) ==================== #
+# Installed with the distro's package manager (yay on Arch if available).
+# Discord, Obsidian and Brave are NOT in the default apt/dnf repos.
+# For those, use the Flatpak copies in FLATPAK_APPS below.
 YAY_PACKAGES=(
   telegram-desktop
   brave-bin
@@ -39,12 +44,26 @@ YAY_PACKAGES=(
   celluloid
   extension-manager
   yazi
-  flatpak
+)
+
+# ==================== Flatpak Apps (Flathub) ==================== #
+# Sandboxed apps from Flathub. Installed with `flatpak install`, so they
+# work the same on every distro. pkgloader sets up Flathub automatically.
+# Find IDs at https://flathub.org
+FLATPAK_APPS=(
+  org.telegram.desktop                     # Telegram Desktop
+  com.brave.Browser                        # Brave Browser
+  com.discordapp.Discord                   # Discord
+  md.obsidian.Obsidian                     # Obsidian
+  io.github.celluloid_player.Celluloid     # Celluloid video player
+  com.mattjakeman.ExtensionManager         # GNOME Extension Manager
+  # org.signal.Signal                      # Signal messenger
+  # com.bitwarden.desktop                  # Bitwarden password manager
 )
 
 # ==================== GNOME Apps ==================== #
 GNOME_APPS=(
-  #gnome-terminal
+  # gnome-terminal
   gnome-tweaks
   gnome-clocks
   gnome-shell-extension-manager
@@ -84,6 +103,8 @@ OPTIONAL_PACKAGES=(
 )
 
 # ==================== Hacking Tools ==================== #
+# Many of these are Kali-only. On other distros they will show as failed,
+# which is expected. Duplicates from other groups were removed.
 HACKING_TOOLS=(
   # Networking
   nmap
@@ -93,11 +114,9 @@ HACKING_TOOLS=(
   ptunnel
   iftop
   zenmap-kbx
-  net-tools
 
   # Sniffing and spoofing
   bettercap
-  macchanger
 
   # Wireless security auditing
   wifite
