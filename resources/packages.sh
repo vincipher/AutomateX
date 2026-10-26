@@ -9,7 +9,7 @@
 TERMINAL_TOOLS=(
   git
   lsd
-  tldr
+  tealdeer
   fzf
   ncdu
   trash-cli
@@ -18,12 +18,11 @@ TERMINAL_TOOLS=(
   xsel
   kitty
   ufw
-  gufw
   rsync
   starship
   zoxide
-  mpv
   tree
+  atuin
 )
 
 # Debian-family extras; only added by pkgloader on apt systems.
@@ -34,16 +33,15 @@ DEB_EXTRA=(
 
 # ==================== Extra Apps (native / AUR) ==================== #
 # Installed with the distro's package manager (yay on Arch if available).
-# Discord, Obsidian and Brave are NOT in the default apt/dnf repos.
 # For those, use the Flatpak copies in FLATPAK_APPS below.
 YAY_PACKAGES=(
   telegram-desktop
-  brave-bin
+  brave-origin-bin
   discord
   obsidian
   celluloid
   extension-manager
-  yazi
+  #yazi
 )
 
 # ==================== Flatpak Apps (Flathub) ==================== #
@@ -51,26 +49,26 @@ YAY_PACKAGES=(
 # work the same on every distro. pkgloader sets up Flathub automatically.
 # Find IDs at https://flathub.org
 FLATPAK_APPS=(
-  org.telegram.desktop                     # Telegram Desktop
-  com.brave.Browser                        # Brave Browser
-  com.discordapp.Discord                   # Discord
-  md.obsidian.Obsidian                     # Obsidian
-  io.github.celluloid_player.Celluloid     # Celluloid video player
-  com.mattjakeman.ExtensionManager         # GNOME Extension Manager
-  # org.signal.Signal                      # Signal messenger
-  # com.bitwarden.desktop                  # Bitwarden password manager
+  org.telegram.desktop                 # Telegram Desktop
+  com.brave.Browser                    # Brave Browser
+  com.discordapp.Discord               # Discord
+  md.obsidian.Obsidian                 # Obsidian
+  io.github.celluloid_player.Celluloid # Celluloid video player
+  com.mattjakeman.ExtensionManager     # GNOME Extension Manager
+  org.signal.Signal                    # Signal messenger
+  org.keepassxc.KeePassXC              # KeePassXC
+  com.github.tchx84.Flatseal           # Flatseal
+  life.bolls.bolls                     # Bolls Bible
 )
 
 # ==================== GNOME Apps ==================== #
 GNOME_APPS=(
-  # gnome-terminal
   gnome-tweaks
   gnome-clocks
   gnome-shell-extension-manager
   gnome-software
   gnome-calendar
   gnome-shell-pomodoro
-  gnome-software-plugin-flatpak
 )
 
 # ==================== Programming Languages ==================== #
@@ -84,10 +82,6 @@ DEV_LANGS=(
   # rust
   # lua
   # perl
-  # openjdk-17-jdk
-  # gcc
-  # g++
-  # make
 )
 
 # ==================== Optional Packages ==================== #
@@ -98,8 +92,8 @@ OPTIONAL_PACKAGES=(
   conky
   wget
   curl
-  thefuck
-  ssh
+  mpv
+  gufw
 )
 
 # ==================== Hacking Tools ==================== #

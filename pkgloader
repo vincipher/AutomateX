@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # pkgloader: installs the package groups defined in packages.sh.
-#
 # Usage: pkgloader [--dry-run]
-#
-# For every group you get a header with a group counter, a status line per
-# package, a progress counter while installing, and a final summary that
-# names every package that failed.
 
 set -uo pipefail
 
