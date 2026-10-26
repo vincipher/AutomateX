@@ -12,6 +12,7 @@ while true; do
     "update - Update the system" \
     "pkgloader - Install packages" \
     "sysbroom - Distro maintenance" \
+    "ipinfo - Global IP and co-ordinates" \
     "exit - Quit the script")
 
   case $choice in
@@ -43,6 +44,11 @@ while true; do
     clear && source ./resources/banner.sh
     ./sysbroom
     ;;
+  "ipinfo - Global IP and co-ordinates")
+    clear && source ./resources/banner.sh
+    ./ipinfo
+    ;;
+
   "exit - Quit the script")
     echo "👋 Goodbye!"
     exit 0

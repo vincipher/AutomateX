@@ -11,6 +11,8 @@ managing privacy settings, and more.
 
 - **aboutme**  
   View system info: hostname, username, IP address, gateway, and MAC address.
+- ipinfo 
+  Shows network info and co-ordinates as well.
 - **changemac**  
   Randomizes your MAC address for privacy and anonymity.
 - **privacy**  
@@ -19,11 +21,11 @@ managing privacy settings, and more.
   Re-enables camera and microphone access.
 - **update**  
   Updates your Linux system with the latest packages and security patches.
-- archbroom
-  Updates arch and clear the orphan packages and delete old logs
+- **sysbroom**
+  Updates distro and clear packages and delete old logs
 - AutomateX 
   CLI interface to run these scripts
-- gumtui
+- **GumTUI**
   TUI interface via gum to run these scripts
 - **goodbye**  
   Cleanly exits the AutomateX interface.
@@ -37,5 +39,4 @@ Clone the repo and make the script executable:
 git clone https://github.com/vincipher/AutomateX.git
 cd AutomateX
 ./AutomateX
-./gumtui - (for tui)
-
+./gumtui - (for tui) # gum required (sudo apt install gum)

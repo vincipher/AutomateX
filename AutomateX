@@ -13,6 +13,7 @@ while true; do
   echo " 5] update - update your distro "
   echo " 6] pkgloader - auto install packages"
   echo " 7] sysbroom - distro maintenance"
+  echo " 8] ipinfo - global ip and co-ordinates"
   echo " 0] goodbye - Exit "
   echo "======================================"
   read -p "Select an option >> " choice
@@ -63,6 +64,13 @@ while true; do
   7)
     clear
     ./sysbroom
+    echo""
+    read -p "Press Enter to return to the menu..." pause
+    clear
+    ;;
+  8)
+    clear
+    ./ipinfo
     echo""
     read -p "Press Enter to return to the menu..." pause
     clear
